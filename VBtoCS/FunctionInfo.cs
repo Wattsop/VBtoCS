@@ -68,6 +68,15 @@ namespace VBtoCS
             return _variables.ContainsKey(vName);
         }
 
+        internal string GetVariableType(string vName)
+        {
+            if (_variables.TryGetValue(vName, out VariableInfo vInfo))
+            {
+                return vInfo.VariableType;
+            }
+            return "";
+        }
+
         internal void SetVariableType(string vName, string vType)
         {
             if (!_variables.ContainsKey(vName))

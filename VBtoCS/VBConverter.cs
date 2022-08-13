@@ -9,8 +9,10 @@ namespace VBtoCS
 {
     internal static class VBConverter
     {
+        private static Dictionary<string, EnumInfo> _enums = new Dictionary<string, EnumInfo>();
         private static Dictionary<string, ClassInfo> _classes = new Dictionary<string, ClassInfo>();
         private static Dictionary<string, FunctionInfo> _functions = new Dictionary<string, FunctionInfo>();
+        private static Dictionary<string, VariableInfo> _variables = new Dictionary<string, VariableInfo>();
 
         // Line end comments using ' are not supported and
         // will be skipped in the output.
@@ -30,6 +32,9 @@ namespace VBtoCS
         // Every time the loop passes a line that ends a class,
         // it removes the last class added to the list.
         private static List<string> _insideClasses = new List<string>();
+        private static FunctionInfo? _insideFunction = null;
+
+        private static List<string> _insideEnums = new List<string>();
 
         // _insideEnum will be true when the loop passes the
         // first line of an enum definition, and false when
@@ -38,7 +43,7 @@ namespace VBtoCS
 
         private static bool _insideModule = false;
         private static bool _insideClass = false;
-        private static bool _insideFunction = false;
+        //private static bool _insideFunction = false;
         private static bool _insideDoLoop = false;
 
         // The _funcInputLineIndex variable keeps track of the
@@ -63,7 +68,7 @@ namespace VBtoCS
 
             _insideModule = false;
             _insideClass = false;
-            _insideFunction = false;
+            _insideFunction = null;
 
             _funcInputLineIndex = -1;
         }
@@ -225,7 +230,7 @@ namespace VBtoCS
                     // Function statement
                     else if (IsOutsideQuotes(lineOps, "Function") && (lineOps[0] != "End"))
                     {
-                        _insideFunction = true;
+                        //_insideFunction = true;
                         FuncOrSub(lineOps, false);
                     }
                     // Get statement (The "Get" accessor from vb Property)
@@ -261,7 +266,7 @@ namespace VBtoCS
                     // Property definition
                     else if (IsOutsideQuotes(lineOps, "Property") && (lineOps[0] != "End"))
                     {
-                        _insideFunction = true;
+                        //_insideFunction = true;
                         Property(lineIndex);
                     }
                     // Return keyword (in Function definition)
@@ -381,7 +386,7 @@ namespace VBtoCS
             //
             // "Sub" by itself will be converted to a
             // function and then to a cs class method.
-            _insideFunction = true;
+            //_insideFunction = true;
 
             int subIndex = lineOps.IndexOf("Sub");
 
@@ -411,6 +416,11 @@ namespace VBtoCS
 
         private static void SubMain(List<string> lineOps)
         {
+            FunctionInfo subMainInfo = new FunctionInfo();
+            subMainInfo.Name = "Main";
+
+            _insideFunction = subMainInfo;
+
             _outputLines.Add("");
 
             // Sub Main() will become static void Main().
@@ -613,10 +623,9 @@ namespace VBtoCS
                 // Check if ops combine to form the && or ++ operators
                 if ((lineOps[j] == "&") && (nextOp != "&") && (previousOp != "+"))
                 {
-                    // Check if ops to the left and right are strings
-                    if (previousOp.Contains('"') && nextOp.Contains('"'))
+                    // Change & to + if the next op is not one of these
+                    if (nextOp != "=" && nextOp != "(" && nextOp != "")
                     {
-                        // Then convert & to +
                         lineOps[j] = "+";
                     }
                 }
@@ -636,6 +645,9 @@ namespace VBtoCS
         // Rewrites a VB "Sub New" as a C# constructor
         private static void SubNew(List<string> lineOps)
         {
+            FunctionInfo subNewInfo = new FunctionInfo();
+            _insideFunction = subNewInfo;
+
             // VB Modules are converted to static C# classes.
             // This constructor (Sub New()) was inside a VB module,
             // so this needs to be a static constructor.
@@ -666,8 +678,11 @@ namespace VBtoCS
                 lineOps.Insert(0, "public");
             }
 
-            // Replace the New keyword with the name of the class
-            lineOps[lineOps.IndexOf("New")] = _insideClasses.Last();
+            // Set subNewInfo.Name to the class name.
+            subNewInfo.Name = _insideClasses.Last();
+
+            // Replace the New keyword with the name of the class.
+            lineOps[lineOps.IndexOf("New")] = subNewInfo.Name;
 
             // Remove Sub keyword
             lineOps.RemoveAt(lineOps.IndexOf("Sub"));
@@ -928,10 +943,12 @@ namespace VBtoCS
             else if (lineOps.Contains("Enum"))
             {
                 _insideEnum = false;
+                _insideEnums.Remove(_insideEnums.Last());
             }
             else if (lineOps.Contains("Function"))
             {
-                _insideFunction = false;
+                //_insideFunction = false;
+                _insideFunction = null;
                 //if (inferFuncReturnType)
                 //{
                 //    
@@ -944,12 +961,14 @@ namespace VBtoCS
             }
             else if (lineOps.Contains("Property"))
             {
-                _insideFunction = false;
+                //_insideFunction = false;
+                _insideFunction = null;
                 return;
             }
             else if (lineOps.Contains("Sub"))
             {
-                _insideFunction = false;
+                //_insideFunction = false;
+                _insideFunction = null;
             }
 
             _outputLines.Add("}");
@@ -1032,7 +1051,7 @@ namespace VBtoCS
             return line;
         }
 
-        private static void EnumStatement(List<string> lineOps)
+        private static void EnumStatementOld(List<string> lineOps)
         {
             string str = "enum ";
 
@@ -1049,13 +1068,46 @@ namespace VBtoCS
             _insideEnum = true;
         }
 
+        private static void EnumStatement(List<string> lineOps)
+        {
+            EnumInfo enumInfo = new EnumInfo();
+            string outputString = "";
+
+            for (int i = 0; i < lineOps.Count; i++)
+            {
+                if (Language.IsAccessModifier(lineOps[i]))
+                {
+                    enumInfo.AddAccessModifier(lineOps[i]);
+                }
+                else if ((lineOps[i] == "Enum") && (i + 1 < lineOps.Count))
+                {
+                    string enumName = lineOps[i + 1];
+                    enumInfo.AddName(enumName);
+                    _enums.Add(enumName, enumInfo);
+                    _insideEnums.Add(enumName);
+                    outputString += "enum ";
+                }
+                else
+                {
+                    outputString += lineOps[i] + " ";
+                }
+            }
+
+            outputString = outputString.Trim();
+
+            _outputLines.Add(outputString);
+            _outputLines.Add("{");
+
+            _insideEnum = true;
+        }
+
         private static void VariableStatement(List<string> lineOps)
         {
             VariableInfo variableInfo = new VariableInfo();
             string previousOp = "";
             string nextOp = "";
 
-            if (_insideModule && !_insideClass && !_insideFunction)
+            if (_insideModule && !_insideClass && (_insideFunction == null))
             {
                 lineOps.Insert(0, "static");
             }
@@ -1087,6 +1139,15 @@ namespace VBtoCS
                         Language.IsIdTypeChar(nextOp) || Language.IsDataType(nextOp))
                     {
                         variableInfo.Name = lineOps[i];
+
+                        if (_insideFunction.HasValue)
+                        {
+                            _insideFunction.Value.AddVariable(variableInfo);
+                        }
+                        else
+                        {
+                            _classes[_insideClasses.Last()].AddVariable(variableInfo);
+                        }
                     }
 
                     if (Language.ConvertIdTypeChar(nextOp, out string? variableType) && variableType != null)
@@ -1108,26 +1169,29 @@ namespace VBtoCS
                     if (lineOps[i] == "New")
                     {
                         variableInfo.IsNew = true;
-
-                        if (Language.ConvertDataType(nextOp.ToLower(), out string? ofDataType))
-                        {
-                            if (ofDataType != null)
-                            {
-                                variableInfo.VariableType = ofDataType;
-                            }
-                        }
-                        else if (_classes.ContainsKey(nextOp))
-                        {
-                            variableInfo.VariableType = nextOp;
-                        }
-                    }
-                    else if (Language.IsDataType(lineOps[i].ToLower()))
-                    {
-                        variableInfo.VariableType = lineOps[i];
                     }
                     else
                     {
-                        variableInfo.Assignment = FormatGenericString(lineOps.GetRange(i, lineOps.Count - i));
+                        nextOp = lineOps[i];
+                    }
+
+                    if (_classes.ContainsKey(nextOp) || _enums.ContainsKey(nextOp))
+                    {
+                        variableInfo.IsNew = true;
+                        variableInfo.VariableType = nextOp;
+                    }
+                    else if (Language.ConvertDataType(nextOp.ToLower(), out string? asDataType))
+                    {
+                        if (asDataType != null)
+                        {
+                            variableInfo.VariableType = asDataType;
+                        }
+                    }
+                    else
+                    {
+                        List<string> assignment = lineOps.GetRange(i, lineOps.Count - i);
+                        AmpersandConcatToPlus(assignment);
+                        variableInfo.Assignment = FormatGenericString(assignment);
                     }
                 }
 
@@ -1614,6 +1678,8 @@ namespace VBtoCS
                 accessorInfo.Parameters = GetFuncParams(lineOps);
                 accessorInfo.Parameters.AddRange(propInfo.Parameters);
 
+                _insideFunction = accessorInfo;
+
                 // If there are no access mods in the accessor,
                 // then the property mods are copied to it.
                 if (accessorInfo.AccessModifiers.Count < 1)
@@ -1672,6 +1738,8 @@ namespace VBtoCS
             funcInfo.ReturnType = GetFuncReturnType(lineOps);
             funcInfo.Name = GetFuncName(lineOps);
             funcInfo.Parameters = GetFuncParams(lineOps);
+
+            _insideFunction = funcInfo;
 
             if (isSub)
             {
